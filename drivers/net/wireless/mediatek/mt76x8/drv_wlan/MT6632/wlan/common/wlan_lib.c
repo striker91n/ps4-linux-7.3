@@ -7795,7 +7795,7 @@ static WLAN_STATUS wlanCfgParseToFW(PCHAR *args, PCHAR args_size, UCHAR nargs, P
 	}
 
 	cmd_v1.itemStringLength = args_size[ED_STRING_SITE];
-	strncpy(cmd_v1.itemString, args[ED_STRING_SITE],  cmd_v1.itemStringLength);
+	strscpy(cmd_v1.itemString, args[ED_STRING_SITE],  cmd_v1.itemStringLength);
 	DBGLOG(INIT, INFO, "itemString:");
 	for (i = 0; i <  cmd_v1.itemStringLength; i++)
 		DBGLOG(INIT, INFO, "%c", cmd_v1.itemString[i]);
@@ -7845,7 +7845,7 @@ static WLAN_STATUS wlanCfgParseToFW(PCHAR *args, PCHAR args_size, UCHAR nargs, P
 		cmd_v1.itemValueLength = bufferindex;
 	} else if (cmd_v1.itemType == ITEM_TYPE_STR) {
 		cmd_v1.itemValueLength = args_size[ED_VALUE_SITE];
-		strncpy(cmd_v1.itemValue, args[ED_VALUE_SITE], cmd_v1.itemValueLength);
+		strscpy(cmd_v1.itemValue, args[ED_VALUE_SITE], cmd_v1.itemValueLength);
 	}
 
 	DBGLOG(INIT, INFO, "Length = %d itemValue:", cmd_v1.itemValueLength);
