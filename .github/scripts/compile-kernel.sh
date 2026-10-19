@@ -2,6 +2,10 @@
 
 set -e
 
+export PATH="/usr/lib/ccache/bin:$PATH"
+export CCACHE_DIR="${HOME}/.cache/ccache"
+export CCACHE_COMPRESS=true
+
 TARGET_PROFILE="$1"
 TARGET_LTO="$2"
 

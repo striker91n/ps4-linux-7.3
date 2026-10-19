@@ -122,6 +122,14 @@ jobs:
         run: |
           bash kernel-source-host/.github/scripts/notify.sh "toolchain ready on ${{ runner.environment }} runner, starting compile"
 
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-kernel
+          restore-keys: |
+            ccache-kernel-
+
       - name: Compile the linux kernel on the runner
         id: compile-kernel-step
         shell: bash
@@ -141,6 +149,14 @@ jobs:
 
           echo "compile-kernel-complete=true" >> "$GITHUB_OUTPUT"
           set -e
+
+
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-kernel-${{ github.run_id }}
 
       - name: Remove compile error problem-matching
         run: echo "::remove-matcher owner=kernel-compile-errors::"
