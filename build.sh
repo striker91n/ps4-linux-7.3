@@ -226,6 +226,25 @@ MAKE_OPTS=(
     HOSTCFLAGS="${HOSTCFLAGS}"
 )
 
+# If compile-kernel.sh found a ccache shim dir, `clang` already resolves through
+# ccache. Otherwise wrap the compilers explicitly so objects are still cached
+# between CI runs (also covers local builds where ccache is installed).
+if command -v ccache >/dev/null 2>&1; then
+    case "$(command -v clang 2>/dev/null || true)" in
+        */ccache/*)
+            echo -e "\e[1;34m[*]\e[0m ccache: clang already routed through ccache"
+            ;;
+        *)
+            MAKE_OPTS+=(
+                CC="ccache clang"
+                HOSTCC="ccache clang"
+                HOSTCXX="ccache clang++"
+            )
+            echo -e "\e[1;34m[*]\e[0m ccache: wrapping CC/HOSTCC explicitly"
+            ;;
+    esac
+fi
+
 if [[ ! -f Makefile ]] || ! grep -q "KERNELRELEASE" Makefile 2>/dev/null; then
     echo -e "\e[1;31mERROR:\e[0m Run this from the kernel source root." >&2
     exit 1

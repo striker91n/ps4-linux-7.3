@@ -123,6 +123,7 @@ jobs:
           bash kernel-source-host/.github/scripts/notify.sh "toolchain ready on ${{ runner.environment }} runner, starting compile"
 
       - name: Restore ccache
+        continue-on-error: true
         uses: actions/cache/restore@v4
         with:
           path: ~/.cache/ccache
@@ -153,6 +154,7 @@ jobs:
 
       - name: Save ccache
         if: always()
+        continue-on-error: true
         uses: actions/cache/save@v4
         with:
           path: ~/.cache/ccache
