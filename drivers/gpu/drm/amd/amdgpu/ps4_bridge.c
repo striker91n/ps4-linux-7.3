@@ -530,7 +530,7 @@ void ps4_bridge_mode_set(struct drm_bridge *bridge,
 	}
 }
 
-static void ps4_bridge_pre_enable(struct drm_bridge *bridge)
+static void ps4_bridge_pre_enable(struct drm_bridge *bridge, struct drm_bridge_state *old_bridge_state)
 {
 	struct ps4_bridge *mn_bridge = bridge_to_ps4_bridge(bridge);
 	DRM_DEBUG_KMS("ps4_bridge_pre_enable\n");
@@ -791,7 +791,7 @@ static void ps4_bridge_enable_mn864729_audio(struct ps4_bridge *mn_bridge)
 	mutex_unlock(&mn_bridge->mutex);
 }
 
-static void ps4_bridge_enable(struct drm_bridge *bridge)
+static void ps4_bridge_enable(struct drm_bridge *bridge, struct drm_bridge_state *old_bridge_state)
 {
 	struct ps4_bridge *mn_bridge = bridge_to_ps4_bridge(bridge);
 	struct drm_connector *connector = mn_bridge->connector;
@@ -979,7 +979,7 @@ out:
 
 }
 
-static void ps4_bridge_disable(struct drm_bridge *bridge)
+static void ps4_bridge_disable(struct drm_bridge *bridge, struct drm_bridge_state *old_bridge_state)
 {
 	struct ps4_bridge *mn_bridge = bridge_to_ps4_bridge(bridge);
 
@@ -1005,7 +1005,7 @@ static void ps4_bridge_disable(struct drm_bridge *bridge)
 	mutex_unlock(&mn_bridge->mutex);
 }
 
-static void ps4_bridge_post_disable(struct drm_bridge *bridge)
+static void ps4_bridge_post_disable(struct drm_bridge *bridge, struct drm_bridge_state *old_bridge_state)
 {
 	struct ps4_bridge *mn_bridge = bridge_to_ps4_bridge(bridge);
 
@@ -1325,10 +1325,10 @@ static int ps4_bridge_attach(struct drm_bridge *bridge,
 }
 
 static struct drm_bridge_funcs ps4_bridge_funcs = {
-	.pre_enable = ps4_bridge_pre_enable,
-	.enable = ps4_bridge_enable,
-	.disable = ps4_bridge_disable,
-	.post_disable = ps4_bridge_post_disable,
+	.atomic_pre_enable = ps4_bridge_pre_enable,
+	.atomic_enable = ps4_bridge_enable,
+	.atomic_disable = ps4_bridge_disable,
+	.atomic_post_disable = ps4_bridge_post_disable,
 	.attach = ps4_bridge_attach,
 	.mode_set = ps4_bridge_mode_set,
 };

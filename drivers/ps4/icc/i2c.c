@@ -151,7 +151,7 @@ int icc_i2c_init(struct apcie_dev *sc)
 	i2c->algo = &icc_i2c_algo;
 	i2c->algo_data = NULL;
 	i2c->dev.parent = &sc->pdev->dev;
-	strncpy(i2c->name, "icc", sizeof(i2c->name));
+	strscpy(i2c->name, "icc", sizeof(i2c->name));
 	i2c_set_adapdata(i2c, sc);
 	ret = i2c_add_adapter(i2c);
 	if (ret < 0) {
