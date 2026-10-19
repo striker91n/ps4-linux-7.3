@@ -89,11 +89,6 @@ jobs:
             "**${{ github.repository }}** build \`#${{ github.run_number }}\` (\`${{ github.workflow }}\`) on branch \`${{ github.ref_name }}\` started by \`${{ github.actor }}\` — profile ${{ steps.build-vars.outputs.target_profile }}, ${{ steps.build-vars.outputs.target_lto }}
           https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
-      - name: Fetch private firmware
-        run: |
-          bash kernel-source-host/.github/scripts/fetch-private-firmware.sh \
-            "${{ secrets.FW_REPO_PAT }}" kernel-source-host
-
       - name: Set SUID to tar binary
         run: sudo chown root /bin/tar && sudo chmod u+s /bin/tar
 
