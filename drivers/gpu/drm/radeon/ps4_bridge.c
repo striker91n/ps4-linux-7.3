@@ -299,7 +299,8 @@ void radeon_ps4_bridge_mode_set(struct drm_bridge *bridge,
 	}
 }
 
-static void radeon_ps4_bridge_pre_enable(struct drm_bridge *bridge)
+static void radeon_ps4_bridge_pre_enable(struct drm_bridge *bridge,
+					 struct drm_atomic_commit *state)
 {
 	struct radeon_ps4_bridge *mn_bridge = bridge_to_radeon_ps4_bridge(bridge);
 	DRM_DEBUG_KMS("radeon_ps4_bridge_pre_enable\n");
@@ -368,7 +369,8 @@ static void radeon_ps4_bridge_pre_enable(struct drm_bridge *bridge)
 	mutex_unlock(&mn_bridge->mutex);
 }
 
-static void radeon_ps4_bridge_enable(struct drm_bridge *bridge)
+static void radeon_ps4_bridge_enable(struct drm_bridge *bridge,
+				     struct drm_atomic_commit *state)
 {
 	struct radeon_ps4_bridge *mn_bridge = bridge_to_radeon_ps4_bridge(bridge);
 	struct drm_connector *connector = mn_bridge->connector;
@@ -628,7 +630,8 @@ static void radeon_ps4_bridge_enable(struct drm_bridge *bridge)
 
 }
 
-static void radeon_ps4_bridge_disable(struct drm_bridge *bridge)
+static void radeon_ps4_bridge_disable(struct drm_bridge *bridge,
+				      struct drm_atomic_commit *state)
 {
 	struct radeon_ps4_bridge *mn_bridge = bridge_to_radeon_ps4_bridge(bridge);
 	DRM_DEBUG_KMS("radeon_ps4_bridge_disable\n");
@@ -643,7 +646,8 @@ static void radeon_ps4_bridge_disable(struct drm_bridge *bridge)
 	mutex_unlock(&mn_bridge->mutex);
 }
 
-static void radeon_ps4_bridge_post_disable(struct drm_bridge *bridge)
+static void radeon_ps4_bridge_post_disable(struct drm_bridge *bridge,
+					   struct drm_atomic_commit *state)
 {
 	/* struct radeon_ps4_bridge *mn_bridge = bridge_to_mn864729(bridge); */
 	DRM_DEBUG_KMS("radeon_ps4_bridge_post_disable\n");
@@ -746,10 +750,10 @@ static int radeon_ps4_bridge_attach(struct drm_bridge *bridge,
 }
 
 static struct drm_bridge_funcs radeon_ps4_bridge_funcs = {
-	.pre_enable = radeon_ps4_bridge_pre_enable,
-	.enable = radeon_ps4_bridge_enable,
-	.disable = radeon_ps4_bridge_disable,
-	.post_disable = radeon_ps4_bridge_post_disable,
+	.atomic_pre_enable = radeon_ps4_bridge_pre_enable,
+	.atomic_enable = radeon_ps4_bridge_enable,
+	.atomic_disable = radeon_ps4_bridge_disable,
+	.atomic_post_disable = radeon_ps4_bridge_post_disable,
 	.attach = radeon_ps4_bridge_attach,
 	.mode_set = radeon_ps4_bridge_mode_set
 };
