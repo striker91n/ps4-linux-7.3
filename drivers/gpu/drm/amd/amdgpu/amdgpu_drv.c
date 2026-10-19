@@ -55,6 +55,10 @@
 #include "amdgpu_userq_fence.h"
 #include "../amdxcp/amdgpu_xcp_drv.h"
 
+#ifdef CONFIG_X86_PS4
+#include <asm/ps4.h>
+#endif
+
 /*
  * KMS wrapper.
  * - 3.0.0 - initial driver
@@ -1993,7 +1997,12 @@ static const struct pci_device_id pciidlist[] = {
 	{ PCI_DEVICE(0x1002, 0x985D), .driver_data = CHIP_MULLINS|AMD_IS_MOBILITY|AMD_IS_APU },
 	{ PCI_DEVICE(0x1002, 0x985E), .driver_data = CHIP_MULLINS|AMD_IS_MOBILITY|AMD_IS_APU },
 	{ PCI_DEVICE(0x1002, 0x985F), .driver_data = CHIP_MULLINS|AMD_IS_MOBILITY|AMD_IS_APU },
-	/* topaz */
+	/* Liverpool */
+	{ PCI_DEVICE(0x1002, 0x9920), .driver_data = CHIP_LIVERPOOL|AMD_IS_APU },
+	{ PCI_DEVICE(0x1002, 0x9922), .driver_data = CHIP_LIVERPOOL|AMD_IS_APU },
+	{ PCI_DEVICE(0x1002, 0x9923), .driver_data = CHIP_LIVERPOOL|AMD_IS_APU },
+	/* Gladius */
+	{ PCI_DEVICE(0x1002, 0x9924), .driver_data = CHIP_GLADIUS|AMD_IS_APU },	/* topaz */
 	{ PCI_DEVICE(0x1002, 0x6900), .driver_data = CHIP_TOPAZ },
 	{ PCI_DEVICE(0x1002, 0x6901), .driver_data = CHIP_TOPAZ },
 	{ PCI_DEVICE(0x1002, 0x6902), .driver_data = CHIP_TOPAZ },
@@ -2429,6 +2438,16 @@ static int amdgpu_pci_probe(struct pci_dev *pdev,
 
 	if (!amdgpu_support_enabled(&pdev->dev, flags & AMD_ASIC_MASK))
 		return -ENODEV;
+
+	#ifdef CONFIG_X86_PS4
+	/* On the PS4 (Liverpool graphics) we have a hard dependency on the
+	 * Aeolia driver to set up the HDMI encoder which is connected to it,
+	 * so defer probe until it is ready. This test passes if this isn't
+	 * a PS4 (returns -ENODEV).
+	 */
+	if (apcie_status() == 0)
+		return -EPROBE_DEFER;
+	#endif
 
 	adev = devm_drm_dev_alloc(&pdev->dev, &amdgpu_kms_driver, typeof(*adev), ddev);
 	if (IS_ERR(adev))

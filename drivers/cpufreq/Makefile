@@ -31,6 +31,7 @@ amd_pstate-y				:= amd-pstate.o amd-pstate-trace.o
 # powernow-k8 can load then. ACPI is preferred to all other hardware-specific drivers.
 # speedstep-* is preferred over p4-clockmod.
 
+obj-$(CONFIG_PS4_CPUFREQ)		+= ps4-cpufreq.o
 obj-$(CONFIG_X86_ACPI_CPUFREQ)		+= acpi-cpufreq.o
 obj-$(CONFIG_X86_AMD_PSTATE)		+= amd_pstate.o
 obj-$(CONFIG_X86_AMD_PSTATE_UT)		+= amd-pstate-ut.o

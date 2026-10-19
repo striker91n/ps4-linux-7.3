@@ -80,7 +80,8 @@ modules.order
 /modules.builtin.modinfo
 /modules.builtin.ranges
 /modules.nsdeps
-
+vmlinux.unstripped
+out/
 #
 # RPM spec file (make rpm-pkg)
 #
@@ -121,6 +122,10 @@ modules.order
 !.mailmap
 !.pylintrc
 !.rustfmt.toml
+
+# Added:
+!.github
+!.dockerignore
 
 #
 # Generated include files

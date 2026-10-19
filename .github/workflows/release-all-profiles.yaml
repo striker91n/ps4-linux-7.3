@@ -1,0 +1,163 @@
+name: "Strawberry-Release-All"
+run-name: "Strawberry release build (all 4 profiles, FullLTO) - ${{ github.ref_name }}"
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [Server, General, SlopMax, Slopium]
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    name: "Build ${{ matrix.profile }} (FullLTO)"
+
+    steps:
+      - name: Checkout CI scripts
+        uses: actions/checkout@v4
+        with:
+          path: ci-scripts
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+          fetch-depth: 1
+
+      - name: Resolve build variables
+        id: build-vars
+        shell: bash
+        run: |
+          bash ci-scripts/.github/scripts/resolve-build-vars.sh "${{ matrix.profile }}" "FullLTO" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          path: kernel-source-host
+          ref: ${{ github.ref }}
+          fetch-depth: 1
+          clean: false
+
+      - name: "Notify: build started"
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WORKFLOW_WEBHOOK }}
+        run: |
+          bash kernel-source-host/.github/scripts/notify.sh \
+            "**${{ github.repository }}** release build \`#${{ github.run_number }}\` on branch \`${{ github.ref_name }}\` started by \`${{ github.actor }}\` — profile ${{ steps.build-vars.outputs.target_profile }}, FullLTO
+          https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+      - name: Fetch private firmware
+        run: |
+          bash kernel-source-host/.github/scripts/fetch-private-firmware.sh \
+            "${{ secrets.FW_REPO_PAT }}" kernel-source-host
+
+      - name: Set SUID to tar binary
+        run: sudo chown root /bin/tar && sudo chmod u+s /bin/tar
+
+      - name: Install build toolchain
+        run: |
+          bash kernel-source-host/.github/scripts/install-toolchain-hosted.sh
+
+      - name: Setup compile error problem-matching for kernel compilation
+        run: echo "::add-matcher::kernel-source-host/.github/problem-matchers/kernel-compile-errors.json"
+
+      - name: Set up swapfile
+        uses: pierotofy/set-swap-space@fc79b3f67fa8a838184ce84a674ca12238d2c761
+        with:
+          swap-size-gb: ${{ steps.build-vars.outputs.swap_gb }}
+
+      - name: Compile the linux kernel on the runner
+        id: compile-kernel-step
+        shell: bash
+        working-directory: kernel-source-host
+        run: |
+          set +e
+
+          bash .github/scripts/compile-kernel.sh \
+            "${{ steps.build-vars.outputs.target_profile }}" \
+            "FullLTO"
+          COMPILE_STATUS=$?
+
+          if [ "$COMPILE_STATUS" -ne 0 ]; then
+            echo "::error::kernel build failed (exit $COMPILE_STATUS)"
+            exit "$COMPILE_STATUS"
+          fi
+
+          echo "compile-kernel-complete=true" >> "$GITHUB_OUTPUT"
+          set -e
+
+      - name: Remove compile error problem-matching
+        run: echo "::remove-matcher owner=kernel-compile-errors::"
+
+      - name: Read Artifact Name
+        id: read-artifact
+        working-directory: kernel-source-host
+        run: |
+          ARTIFACT_ZIP_NAME="$(cat artifact_zip_name.txt 2>/dev/null || echo kernel.zip)"
+          echo "pkg_zip_name=${ARTIFACT_ZIP_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload kernel package to github actions artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.read-artifact.outputs.pkg_zip_name }}
+          path: kernel-source-host/${{ steps.read-artifact.outputs.pkg_zip_name }}
+          retention-days: 14
+          archive: false
+
+      - name: "Notify: build failed"
+        if: failure()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WORKFLOW_WEBHOOK }}
+        run: |
+          bash kernel-source-host/.github/scripts/notify.sh \
+            "**${{ github.repository }}** release build \`#${{ github.run_number }}\` (${{ matrix.profile }}) on branch \`${{ github.ref_name }}\` FAILED
+          https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+  release:
+    needs: build
+    if: always() && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout CI scripts
+        uses: actions/checkout@v4
+        with:
+          path: ci-scripts
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+          fetch-depth: 1
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: "Notify: publishing release"
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WORKFLOW_WEBHOOK }}
+        run: |
+          bash ci-scripts/.github/scripts/notify.sh "**${{ github.repository }}** all 4 profiles built, publishing release \`${{ github.ref_name }}\`"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "Strawberry ${{ github.ref_name }}"
+          draft: true
+          make_latest: false
+          body: |
+            All 4 build profiles, FullLTO. Not sure which one to grab? Pick by what you're doing with it:
+
+            - **Server**: headless/services box, no desktop, max throughput.
+            - **General**: everyday desktop/gaming use. Pick this by default.
+            - **SlopMax**: General, but you also want to run VMs on top (KVM).
+            - **Slopium**: Server, but you also want to run VMs on top (KVM).
+
+            See the changelog for what's actually new this release.
+          files: |
+            dist/*.zip

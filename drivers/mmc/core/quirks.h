@@ -207,9 +207,15 @@ static const struct mmc_fixup __maybe_unused sdio_fixup_methods[] = {
 
 	SDIO_FIXUP(SDIO_VENDOR_ID_MARVELL, SDIO_DEVICE_ID_MARVELL_8887_F0,
 		   add_limit_rate_quirk, 150000000),
-
 	SDIO_FIXUP(SDIO_VENDOR_ID_NXP, SDIO_DEVICE_ID_NXP_IW61X_BASE,
 		   add_quirk, MMC_QUIRK_BLKSZ_FOR_BYTE_MODE),
+
+	/* PS4: Marvell 8897 F0 (SD8897 WiFi) — base function needs the limit-rate quirk.
+	 * Since 8897 traditionally doesn't need any quirk handling, SDIO_IDs doesn't
+	 * include the F0 ID (0x912c).
+	 */
+	SDIO_FIXUP(SDIO_VENDOR_ID_MARVELL, SDIO_DEVICE_ID_MARVELL_8897_F0,
+		   add_limit_rate_quirk, 150000000),
 
 	END_FIXUP
 };

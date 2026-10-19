@@ -112,6 +112,7 @@ struct sdio_driver {
 	__sdio_register_driver(drv, THIS_MODULE)
 extern int __sdio_register_driver(struct sdio_driver *, struct module *);
 extern void sdio_unregister_driver(struct sdio_driver *);
+extern const struct bus_type sdio_bus_type;
 
 /**
  * module_sdio_driver() - Helper macro for registering a SDIO driver

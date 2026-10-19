@@ -1,0 +1,209 @@
+name: "Strawberry-LTS"
+run-name: "${{ github.event_name == 'workflow_dispatch' && format('Strawberry-{0}-{1}', inputs.profile, inputs.lto) || format('Strawberry-tag-{0}', github.ref_name) }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "Build Profile"
+        required: true
+        default: "Server"
+        type: choice
+        options:
+          - Server
+          - General
+          - SlopMax
+          - Slopium
+      lto:
+        description: "LTO Variant"
+        required: true
+        default: "ThinLTO"
+        type: choice
+        options:
+          - NoLTO
+          - ThinLTO
+          - FullLTO
+      runner:
+        description: "Runner"
+        required: true
+        default: "Hosted"
+        type: choice
+        options:
+          - Hosted
+          - Self-hosted-PS5
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    permissions:
+      contents: read
+    runs-on: ${{ (github.event_name == 'workflow_dispatch' && inputs.runner == 'Self-hosted-PS5') && fromJSON('["self-hosted", "ps5"]') || 'ubuntu-latest' }}
+
+    steps:
+      - name: Set up cache env vars
+        id: cache-workspace-vars
+        run: |
+          echo "CACHE_WORKSPACE_KEY=${{ runner.os }}-workspace-${{ github.run_id }}" >> "$GITHUB_ENV"
+          echo "CACHE_WORKSPACE_RESTORE_KEY=${{ runner.os }}-workspace-${{ github.ref_name }}" >> "$GITHUB_ENV"
+
+      - name: Checkout CI scripts
+        uses: actions/checkout@v4
+        with:
+          path: ci-scripts
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+          fetch-depth: 1
+
+      - name: Resolve build variables
+        id: build-vars
+        shell: bash
+        run: |
+          PROFILE_INPUT="${{ github.event_name == 'workflow_dispatch' && inputs.profile || 'Server' }}"
+          LTO_INPUT="${{ github.event_name == 'workflow_dispatch' && inputs.lto || 'ThinLTO' }}"
+
+          bash ci-scripts/.github/scripts/resolve-build-vars.sh "$PROFILE_INPUT" "$LTO_INPUT" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Cache of Github Workspace
+        if: runner.environment != 'self-hosted'
+        uses: actions/cache/restore@v4
+        id: cache-restore-workspace
+        with:
+          path: kernel-source-host
+          key: ${{ env.CACHE_WORKSPACE_RESTORE_KEY }}-${{ steps.build-vars.outputs.cache_suffix }}
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          path: kernel-source-host
+          ref: ${{ github.ref }}
+          fetch-depth: 1
+          clean: false
+
+      - name: "Notify: build started"
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WORKFLOW_WEBHOOK }}
+        run: |
+          bash kernel-source-host/.github/scripts/notify.sh \
+            "**${{ github.repository }}** build \`#${{ github.run_number }}\` (\`${{ github.workflow }}\`) on branch \`${{ github.ref_name }}\` started by \`${{ github.actor }}\` — profile ${{ steps.build-vars.outputs.target_profile }}, ${{ steps.build-vars.outputs.target_lto }}
+          https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+      - name: Fetch private firmware
+        run: |
+          bash kernel-source-host/.github/scripts/fetch-private-firmware.sh \
+            "${{ secrets.FW_REPO_PAT }}" kernel-source-host
+
+      - name: Set SUID to tar binary
+        run: sudo chown root /bin/tar && sudo chmod u+s /bin/tar
+
+      - name: Install build toolchain (hosted)
+        if: runner.environment != 'self-hosted'
+        run: |
+          bash kernel-source-host/.github/scripts/install-toolchain-hosted.sh
+
+      - name: Install build toolchain (self-hosted)
+        if: runner.environment == 'self-hosted'
+        run: |
+          bash kernel-source-host/.github/scripts/install-toolchain-self-hosted.sh
+
+      - name: Setup compile error problem-matching for kernel compilation
+        run: echo "::add-matcher::kernel-source-host/.github/problem-matchers/kernel-compile-errors.json"
+
+      - name: Set up swapfile (hosted)
+        if: runner.environment != 'self-hosted'
+        uses: pierotofy/set-swap-space@fc79b3f67fa8a838184ce84a674ca12238d2c761
+        with:
+          swap-size-gb: ${{ steps.build-vars.outputs.swap_gb }}
+
+      - name: Set up swapfile (self-hosted)
+        if: runner.environment == 'self-hosted' && steps.build-vars.outputs.target_lto == 'FullLTO'
+        run: |
+          bash kernel-source-host/.github/scripts/swap-self-hosted.sh enable "${{ steps.build-vars.outputs.swap_gb }}"
+
+      - name: "Notify: toolchain ready, starting compile"
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WORKFLOW_WEBHOOK }}
+        run: |
+          bash kernel-source-host/.github/scripts/notify.sh "toolchain ready on ${{ runner.environment }} runner, starting compile"
+
+      - name: Compile the linux kernel on the runner
+        id: compile-kernel-step
+        shell: bash
+        working-directory: kernel-source-host
+        run: |
+          set +e
+
+          bash .github/scripts/compile-kernel.sh \
+            "${{ steps.build-vars.outputs.target_profile }}" \
+            "${{ steps.build-vars.outputs.target_lto }}"
+          COMPILE_STATUS=$?
+
+          if [ "$COMPILE_STATUS" -ne 0 ]; then
+            echo "::error::kernel build failed (exit $COMPILE_STATUS)"
+            exit "$COMPILE_STATUS"
+          fi
+
+          echo "compile-kernel-complete=true" >> "$GITHUB_OUTPUT"
+          set -e
+
+      - name: Remove compile error problem-matching
+        run: echo "::remove-matcher owner=kernel-compile-errors::"
+
+      - name: "Notify: compile complete"
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WORKFLOW_WEBHOOK }}
+        run: |
+          bash kernel-source-host/.github/scripts/notify.sh \
+            "compile complete for **${{ github.repository }}** \`#${{ github.run_number }}\` — profile ${{ steps.build-vars.outputs.target_profile }}, ${{ steps.build-vars.outputs.target_lto }}, packaging artifacts now"
+
+      - name: Read Artifact Name
+        id: read-artifact
+        working-directory: kernel-source-host
+        run: |
+          ARTIFACT_ZIP_NAME="$(cat artifact_zip_name.txt 2>/dev/null || echo kernel.zip)"
+          echo "pkg_zip_name=${ARTIFACT_ZIP_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload kernel package to github actions artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.read-artifact.outputs.pkg_zip_name }}
+          path: kernel-source-host/${{ steps.read-artifact.outputs.pkg_zip_name }}
+          retention-days: 14
+          archive: false
+
+      - name: "Notify: artifact uploaded"
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WORKFLOW_WEBHOOK }}
+        run: |
+          bash kernel-source-host/.github/scripts/notify.sh \
+            "**${{ github.repository }}** build \`#${{ github.run_number }}\` (\`${{ github.workflow }}\`) on branch \`${{ github.ref_name }}\` is done!
+          Artifact: https://nightly.link/${{ github.repository }}/actions/runs/${{ github.run_id }}/${{ steps.read-artifact.outputs.pkg_zip_name }}.zip"
+
+      - name: "Notify: build failed"
+        if: failure()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WORKFLOW_WEBHOOK }}
+        run: |
+          bash kernel-source-host/.github/scripts/notify.sh \
+            "**${{ github.repository }}** build \`#${{ github.run_number }}\` (\`${{ github.workflow }}\`) on branch \`${{ github.ref_name }}\` FAILED
+          https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+      - name: Delete Cache of Github Workspace
+        env:
+          GH_TOKEN: ${{ github.token }}
+        if: steps.cache-restore-workspace.outputs.cache-hit && steps.compile-kernel-step.outputs.compile-kernel-complete
+        run: |
+          gh cache delete --repo ${{ github.repository }} ${{ steps.cache-restore-workspace.outputs.cache-primary-key }} || true
+
+      - name: Save Cache of Github Workspace
+        uses: actions/cache/save@v4
+        if: runner.environment != 'self-hosted' && steps.compile-kernel-step.outputs.compile-kernel-complete
+        with:
+          path: kernel-source-host
+          key: ${{ steps.cache-restore-workspace.outputs.cache-primary-key }}
+
+      - name: Tear down swapfile (self-hosted)
+        if: always() && runner.environment == 'self-hosted'
+        run: |
+          bash kernel-source-host/.github/scripts/swap-self-hosted.sh disable

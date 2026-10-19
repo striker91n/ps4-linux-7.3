@@ -37,6 +37,10 @@
 
 #include "cqhci.h"
 
+#ifdef CONFIG_X86_PS4
+#include <asm/ps4.h>
+#endif
+
 #include "sdhci.h"
 #include "sdhci-cqhci.h"
 #include "sdhci-pci.h"
@@ -324,6 +328,78 @@ static const struct sdhci_pci_fixes sdhci_cafe = {
 static const struct sdhci_pci_fixes sdhci_intel_qrk = {
 	.quirks		= SDHCI_QUIRK_NO_HISPD_BIT,
 };
+
+#ifdef CONFIG_X86_PS4
+static int aeolia_probe(struct sdhci_pci_chip *chip)
+{
+	chip->num_slots = 1;
+	chip->first_bar = 0;
+	if (apcie_status() == 0)
+		return -EPROBE_DEFER;
+
+	chip->pdev->class &= ~0x0000FF;
+	chip->pdev->class |= PCI_SDHCI_IFDMA;
+	return 0;
+}
+
+static int aeolia_probe_slot(struct sdhci_pci_slot *slot)
+{
+	int err = apcie_assign_irqs(slot->chip->pdev, 1);
+	if (err <= 0) {
+		dev_err(&slot->chip->pdev->dev, "failed to get IRQ: %d\n", err);
+		return -ENODEV;
+	}
+	slot->host->irq = slot->chip->pdev->irq;
+
+	/**			-- Quirk Handling --			**
+	* Needed by certain PS4 console models with the Marvell 88w8897 WiFi+BT chip,
+	* typically present on Belize CUH-1215 and CUH-1216 motherboards.
+	*
+	* Although there's a pathway to identify the model using the AMD VGA controller ID:
+	* #define PCI_DEVICE_ID_CUH_11XX 0x9920
+	* #define PCI_DEVICE_ID_CUH_12XX 0x9922
+	* from drivers/gpu/drm/amd/amdgpu/ps4_bridge.c,
+	*
+	* there is report from an Aeolia CUH-1003 model as well, with the same issue.
+
+	* So it's best to use the SDHCI IDs directly.
+	* Ideally we'd match against the card's CIS vendor and device IDs as well,
+	* but since this host controller has to initialize before we init the card,
+	* there seems to be no good way to check that.
+	*
+	* On unaffected systems, the quirk only prevents usage of predefined clock timings,
+	* for standard clock modes (SDR50, SDR104), and instead calculates it on the fly
+	* using host capabiilites. So it should be harmless in all cases.
+	*/
+	if ((slot->chip->pdev->device == PCI_DEVICE_ID_SONY_AEOLIA_SDHCI) || \
+	    (slot->chip->pdev->device == PCI_DEVICE_ID_SONY_BELIZE_SDHCI) || \
+	    (slot->chip->pdev->device == PCI_DEVICE_ID_SONY_BAIKAL_SDHCI)) {
+		slot->host->quirks2 |= SDHCI_QUIRK2_PRESET_VALUE_BROKEN;
+        }
+
+	return 0;
+}
+
+static void aeolia_remove_slot(struct sdhci_pci_slot *slot, int dead)
+{
+	apcie_free_irqs(slot->chip->pdev->irq, 1);
+}
+
+static int aeolia_enable_dma(struct sdhci_pci_slot *slot)
+{
+	if (dma_set_mask_and_coherent(&slot->chip->pdev->dev, DMA_BIT_MASK(31))) {
+		return -EINVAL;
+	}
+	return 0;
+}
+
+static const struct sdhci_pci_fixes sdhci_aeolia = {
+	.probe		= aeolia_probe,
+	.probe_slot	= aeolia_probe_slot,
+	.remove_slot	= aeolia_remove_slot,
+	.enable_dma	= aeolia_enable_dma,
+};
+#endif
 
 static int mrst_hc_probe_slot(struct sdhci_pci_slot *slot)
 {
@@ -1955,6 +2031,11 @@ static const struct pci_device_id pci_ids[] = {
 	SDHCI_PCI_DEVICE(O2, GG8_9863, o2),
 	SDHCI_PCI_DEVICE(ARASAN, PHY_EMMC, arasan),
 	SDHCI_PCI_DEVICE(SYNOPSYS, DWC_MSHC, snps),
+	#ifdef CONFIG_X86_PS4
+	SDHCI_PCI_DEVICE(SONY, AEOLIA_SDHCI, aeolia),
+	SDHCI_PCI_DEVICE(SONY, BELIZE_SDHCI, aeolia),
+	SDHCI_PCI_DEVICE(SONY, BAIKAL_SDHCI, aeolia),
+	#endif
 	SDHCI_PCI_DEVICE(GLI, 9750, gl9750),
 	SDHCI_PCI_DEVICE(GLI, 9755, gl9755),
 	SDHCI_PCI_DEVICE(GLI, 9763E, gl9763e),
@@ -1989,6 +2070,10 @@ int sdhci_pci_enable_dma(struct sdhci_host *host)
 	}
 
 	pci_set_master(pdev);
+
+	if (slot->chip->fixes && slot->chip->fixes->enable_dma) {
+		return slot->chip->fixes->enable_dma(slot);
+	}
 
 	return 0;
 }
@@ -2341,6 +2426,7 @@ static int sdhci_pci_probe(struct pci_dev *pdev,
 		chip->allow_runtime_pm = chip->fixes->allow_runtime_pm;
 	}
 	chip->num_slots = slots;
+	chip->first_bar = first_bar;
 	chip->pm_retune = true;
 	chip->rpm_retune = true;
 
@@ -2355,7 +2441,11 @@ static int sdhci_pci_probe(struct pci_dev *pdev,
 	slots = chip->num_slots;	/* Quirk may have changed this */
 
 	for (i = 0; i < slots; i++) {
+		#ifdef CONFIG_X86_PS4
+		slot = sdhci_pci_probe_slot(pdev, chip, chip->first_bar, i);
+		#else
 		slot = sdhci_pci_probe_slot(pdev, chip, first_bar, i);
+		#endif
 		if (IS_ERR(slot)) {
 			for (i--; i >= 0; i--)
 				sdhci_pci_remove_slot(chip->slots[i]);

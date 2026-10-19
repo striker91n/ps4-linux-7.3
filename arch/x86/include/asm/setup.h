@@ -69,6 +69,15 @@ extern void x86_ce4100_early_setup(void);
 static inline void x86_ce4100_early_setup(void) { }
 #endif
 
+#include <linux/kexec_handover.h>
+
+#ifdef CONFIG_X86_PS4
+extern void x86_ps4_early_setup(void);
+#else
+static inline void x86_ps4_early_setup(void) { }
+#endif
+
+
 #ifndef _SETUP
 
 #include <asm/espfix.h>

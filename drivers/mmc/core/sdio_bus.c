@@ -250,7 +250,7 @@ static const struct dev_pm_ops sdio_bus_pm_ops = {
 	)
 };
 
-static const struct bus_type sdio_bus_type = {
+const struct bus_type sdio_bus_type = {
 	.name		= "sdio",
 	.dev_groups	= sdio_dev_groups,
 	.match		= sdio_bus_match,
@@ -260,6 +260,7 @@ static const struct bus_type sdio_bus_type = {
 	.shutdown	= sdio_bus_shutdown,
 	.pm		= &sdio_bus_pm_ops,
 };
+EXPORT_SYMBOL_GPL(sdio_bus_type);
 
 int sdio_register_bus(void)
 {

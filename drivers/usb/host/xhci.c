@@ -5530,21 +5530,23 @@ int xhci_gen_setup(struct usb_hcd *hcd, xhci_get_quirks_t get_quirks)
 	 * 64-bit addressing, unless a controller-specific quirk callback
 	 * limits the usable address width.
 	 */
-	if ((xhci->hcc_params & HCC_64BIT_ADDR) &&
-	    !dma_set_mask(dev, DMA_BIT_MASK(xhci->dma_mask_bits))) {
-		xhci_dbg(xhci, "Enabling %u-bit DMA addresses.\n",
-			 xhci->dma_mask_bits);
-		dma_set_coherent_mask(dev, DMA_BIT_MASK(xhci->dma_mask_bits));
-	} else {
-		/*
-		 * This is to avoid error in cases where a 32-bit USB
-		 * controller is used on a 64-bit capable system.
-		 */
-		retval = dma_set_mask(dev, DMA_BIT_MASK(32));
-		if (retval)
-			return retval;
-		xhci_dbg(xhci, "Enabling 32-bit DMA addresses.\n");
-		dma_set_coherent_mask(dev, DMA_BIT_MASK(32));
+	if (!(xhci->quirks & XHCI_PLAT_DMA)) {
+		if ((xhci->hcc_params & HCC_64BIT_ADDR) &&
+		    !dma_set_mask(dev, DMA_BIT_MASK(xhci->dma_mask_bits))) {
+			xhci_dbg(xhci, "Enabling %u-bit DMA addresses.\n",
+				 xhci->dma_mask_bits);
+			dma_set_coherent_mask(dev, DMA_BIT_MASK(xhci->dma_mask_bits));
+		} else {
+			/*
+			 * This is to avoid error in cases where a 32-bit USB
+			 * controller is used on a 64-bit capable system.
+			 */
+			retval = dma_set_mask(dev, DMA_BIT_MASK(32));
+			if (retval)
+				return retval;
+			xhci_dbg(xhci, "Enabling 32-bit DMA addresses.\n");
+			dma_set_coherent_mask(dev, DMA_BIT_MASK(32));
+		}
 	}
 
 	spin_lock_init(&xhci->lock);

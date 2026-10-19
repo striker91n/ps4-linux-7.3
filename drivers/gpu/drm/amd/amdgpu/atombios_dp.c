@@ -173,6 +173,9 @@ amdgpu_atombios_dp_aux_transfer(struct drm_dp_aux *aux, struct drm_dp_aux_msg *m
 			tx_buf[3] |= tx_size << 4;
 		ret = amdgpu_atombios_dp_process_aux_ch(chan,
 						 tx_buf, tx_size, msg->buffer, msg->size, delay, &ack);
+		DRM_DEBUG_KMS("aux xfer: addr=0x%05x req=0x%x size=%zu ret=%d ack=0x%02x buf=%*ph\n",
+			      msg->address, msg->request, msg->size, ret, ack,
+			      (int)msg->size, msg->buffer);
 		break;
 	default:
 		ret = -EINVAL;
@@ -258,12 +261,20 @@ static int amdgpu_atombios_dp_get_dp_link_config(struct drm_connector *connector
 		amdgpu_atombios_dp_convert_bpc_to_bpp(amdgpu_connector_get_monitor_bpc(connector));
 	static const unsigned link_rates[3] = { 162000, 270000, 540000 };
 	unsigned max_link_rate = drm_dp_max_link_rate(dpcd);
+	unsigned min_lane_num = 1;
 	unsigned max_lane_num = drm_dp_max_lane_count(dpcd);
 	unsigned lane_num, i, max_pix_clock;
+	struct amdgpu_connector *amdgpu_connector = to_amdgpu_connector(connector);
+	struct drm_device *dev = amdgpu_connector->base.dev;
+	struct amdgpu_device *adev = drm_to_adev(dev);
+
+	/* Liverpool is always connected to an encoder that needs 4 lanes */
+	if ((adev->asic_type == CHIP_LIVERPOOL) || (adev->asic_type == CHIP_GLADIUS))
+		min_lane_num = 4;
 
 	if (amdgpu_connector_encoder_get_dp_bridge_encoder_id(connector) ==
 	    ENCODER_OBJECT_ID_NUTMEG) {
-		for (lane_num = 1; lane_num <= max_lane_num; lane_num <<= 1) {
+		for (lane_num = min_lane_num; lane_num <= max_lane_num; lane_num <<= 1) {
 			max_pix_clock = (lane_num * 270000 * 8) / bpp;
 			if (max_pix_clock >= pix_clock) {
 				*dp_lanes = lane_num;
@@ -408,6 +419,8 @@ int amdgpu_atombios_dp_get_panel_mode(struct drm_encoder *encoder,
 void amdgpu_atombios_dp_set_link_config(struct drm_connector *connector,
 				 const struct drm_display_mode *mode)
 {
+	struct drm_device *dev = connector->dev;
+	struct amdgpu_device *adev = drm_to_adev(dev);
 	struct amdgpu_connector *amdgpu_connector = to_amdgpu_connector(connector);
 	struct amdgpu_connector_atom_dig *dig_connector;
 	int ret;
@@ -426,6 +439,11 @@ void amdgpu_atombios_dp_set_link_config(struct drm_connector *connector,
 			dig_connector->dp_clock = 0;
 			dig_connector->dp_lane_count = 0;
 		}
+		if (adev->asic_type == CHIP_LIVERPOOL ||
+		    adev->asic_type == CHIP_GLADIUS)
+			DRM_DEBUG_KMS("ps4 dp link config: ret=%d mode_clock=%d lanes=%u clock=%u sink_type=%d\n",
+				      ret, mode->clock, dig_connector->dp_lane_count,
+				      dig_connector->dp_clock, dig_connector->dp_sink_type);
 	}
 }
 
@@ -485,6 +503,8 @@ void amdgpu_atombios_dp_set_rx_power_state(struct drm_connector *connector,
 	}
 }
 
+#define PCI_DEVICE_ID_CUH_11XX 0x9920
+
 struct amdgpu_atombios_dp_link_train_info {
 	struct amdgpu_device *adev;
 	struct drm_encoder *encoder;
@@ -492,6 +512,7 @@ struct amdgpu_atombios_dp_link_train_info {
 	int dp_clock;
 	int dp_lane_count;
 	bool tp3_supported;
+	bool skip_status_check;
 	u8 dpcd[DP_RECEIVER_CAP_SIZE];
 	u8 train_set[4];
 	u8 link_status[DP_LINK_STATUS_SIZE];
@@ -608,6 +629,11 @@ amdgpu_atombios_dp_link_train_cr(struct amdgpu_atombios_dp_link_train_info *dp_i
 
 	udelay(400);
 
+	if (dp_info->skip_status_check) {
+		DRM_DEBUG_KMS("dp cr: skipping status poll (mn864729 fixed link)\n");
+		return 0;
+	}
+
 	/* clock recovery loop */
 	clock_recovery = false;
 	dp_info->tries = 0;
@@ -620,6 +646,7 @@ amdgpu_atombios_dp_link_train_cr(struct amdgpu_atombios_dp_link_train_info *dp_i
 			DRM_ERROR("displayport link status failed\n");
 			break;
 		}
+		DRM_DEBUG_KMS("dp cr: link_status raw=%6ph\n", dp_info->link_status);
 
 		if (drm_dp_clock_recovery_ok(dp_info->link_status, dp_info->dp_lane_count)) {
 			clock_recovery = true;
@@ -649,6 +676,7 @@ amdgpu_atombios_dp_link_train_cr(struct amdgpu_atombios_dp_link_train_info *dp_i
 		/* Compute new train_set as requested by sink */
 		amdgpu_atombios_dp_get_adjust_train(dp_info->link_status, dp_info->dp_lane_count,
 					     dp_info->train_set);
+		DRM_DEBUG_KMS("dp cr: train_set=%4ph\n", dp_info->train_set);
 
 		amdgpu_atombios_dp_update_vs_emph(dp_info);
 	}
@@ -673,6 +701,11 @@ amdgpu_atombios_dp_link_train_ce(struct amdgpu_atombios_dp_link_train_info *dp_i
 		amdgpu_atombios_dp_set_tp(dp_info, DP_TRAINING_PATTERN_3);
 	else
 		amdgpu_atombios_dp_set_tp(dp_info, DP_TRAINING_PATTERN_2);
+
+	if (dp_info->skip_status_check) {
+		DRM_DEBUG_KMS("dp ce: skipping status poll (mn864729 fixed link)\n");
+		return 0;
+	}
 
 	/* channel equalization loop */
 	dp_info->tries = 0;
@@ -757,6 +790,7 @@ void amdgpu_atombios_dp_link_train(struct drm_encoder *encoder,
 	dp_info.dp_lane_count = dig_connector->dp_lane_count;
 	dp_info.dp_clock = dig_connector->dp_clock;
 	dp_info.aux = &amdgpu_connector->ddc_bus->aux;
+	dp_info.skip_status_check = adev->pdev->device != PCI_DEVICE_ID_CUH_11XX;
 
 	if (amdgpu_atombios_dp_link_train_init(&dp_info))
 		goto done;

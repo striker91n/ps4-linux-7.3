@@ -33,6 +33,14 @@ config X86_PCC_CPUFREQ
 
 	  If in doubt, say N.
 
+config PS4_CPUFREQ
+	bool "PS4 (AMD Jaguar) cpufreq driver"
+	depends on X86 && CPU_SUP_AMD
+	help
+	  This driver adds cpufreq support for the PS4's AMD Jaguar
+	  (Family 16h) APU, using the hardware P-state MSR interface
+	  directly.
+
 config X86_AMD_PSTATE
 	bool "AMD Processor P-State driver"
 	depends on ACPI

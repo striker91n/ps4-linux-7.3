@@ -268,6 +268,9 @@ enum csr_regs {
 	B0_Y2_SP_EISR	= 0x0024,
 	B0_Y2_SP_LISR	= 0x0028,
 	B0_Y2_SP_ICR	= 0x002c,
+#ifdef CONFIG_X86_PS4
+	AEOLIA_SP_ICR	= 0x0068,
+#endif
 
 	B2_MAC_1	= 0x0100,
 	B2_MAC_2	= 0x0108,
@@ -2289,6 +2292,8 @@ struct sky2_hw {
 #define SKY2_HW_RSS_CHKSUM	0x00000400	/* RSS requires chksum */
 #define SKY2_HW_IRQ_SETUP	0x00000800
 
+#define SKY2_HW_USE_AEOLIA_MSI	0x00001000
+
 	u8	     	     chip_id;
 	u8		     chip_rev;
 	u8		     pmd_type;
@@ -2303,6 +2308,7 @@ struct sky2_hw {
 	struct work_struct   restart_work;
 	wait_queue_head_t    msi_wait;
 
+	u8		     phy_addr;
 	char		     irq_name[];
 };
 

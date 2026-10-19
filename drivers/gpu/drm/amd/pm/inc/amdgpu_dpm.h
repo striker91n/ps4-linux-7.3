@@ -373,6 +373,7 @@ struct amdgpu_pm {
 	 * 0 = disabled (default), otherwise enable corresponding debug mode
 	 */
 	uint32_t		smu_debug_mask;
+	uint32_t		smu_reg_sel;
 
 	bool			pp_force_state_enabled;
 
