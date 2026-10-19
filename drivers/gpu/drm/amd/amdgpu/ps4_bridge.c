@@ -524,6 +524,28 @@ void ps4_bridge_mode_set(struct drm_bridge *bridge,
 	/* This gets called before pre_enable/enable, so we just stash
 	 * the vic ID for later */
 	mn_bridge->mode = drm_match_cea_mode(adjusted_mode);
+
+	/*
+	 * PS4 fix: the forced synthetic EDID (edid/my_edid.bin) is a base-block
+	 * only EDID with no CEA-861 extension, so its 1920x1080@60 detailed
+	 * timing does not match the CEA table and drm_match_cea_mode() returns 0
+	 * (VIC 0). That timing is exposed to userspace alongside the driver's own
+	 * CEA mode_1080p, and KWin/kscreen can select it; the bridge then rejects
+	 * the whole modeset ("non-CEA mode" / "mode not available") and the
+	 * display stays black. Map the well-known timings back to their CEA VIC so
+	 * a modeset succeeds no matter which duplicate userspace picks.
+	 */
+	if (!mn_bridge->mode) {
+		unsigned int vrefresh = drm_mode_vrefresh(adjusted_mode);
+
+		if (adjusted_mode->hdisplay == 1920 &&
+		    adjusted_mode->vdisplay == 1080)
+			mn_bridge->mode = (vrefresh >= 100) ? 63 : 16;
+		else if (adjusted_mode->hdisplay == 1280 &&
+			 adjusted_mode->vdisplay == 720)
+			mn_bridge->mode = 4;
+	}
+
 	DRM_DEBUG_KMS("vic mode: %d\n", mn_bridge->mode);
 	if (!mn_bridge->mode) {
 		DRM_ERROR("attempted to set non-CEA mode\n");
@@ -971,6 +993,20 @@ static void ps4_bridge_enable(struct drm_bridge *bridge, struct drm_atomic_commi
 			ps4_bridge_enable_mn864729_audio(mn_bridge);
 	}
 
+	/*
+	 * PS4 fix (aday1/ps4-hdmi-blackscreen): force a separate un-mute
+	 * transaction so a truncated enable queue cannot strand the un-mute
+	 * and mute the panel for the rest of the boot.
+	 */
+	if (success) {
+		mutex_lock(&mn_bridge->mutex);
+		cq_init(&mn_bridge->cq, 4);
+		cq_writereg(&mn_bridge->cq, VMUTECNT, VMUTECNT_LINEWIDTH_90);
+		if (cq_exec(&mn_bridge->cq) < 0)
+			DRM_ERROR("ps4_bridge: forced un-mute failed\n");
+		mutex_unlock(&mn_bridge->mutex);
+	}
+
 out:
 	mutex_lock(&mn_bridge->mutex);
 	mn_bridge->enabled = success;
@@ -997,8 +1033,17 @@ static void ps4_bridge_disable(struct drm_bridge *bridge, struct drm_atomic_comm
 	DRM_DEBUG_KMS("ps4_bridge_disable\n");
 
 	cq_init(&mn_bridge->cq, 4);
+	/*
+	 * PS4 fix (aday1/ps4-hdmi-blackscreen): do NOT mute here.
+	 * .disable runs before the first userspace modeset, and the matching
+	 * un-mute is the last command of the enable queue. If that queue is
+	 * truncated, the panel stays permanently black while the TV still
+	 * reports 1080p60. Leaving video unmuted keeps the console alive.
+	 */
+#if 0
 	cq_writereg(&mn_bridge->cq, VMUTECNT, VMUTECNT_LINEWIDTH_90 | VMUTECNT_VMUTE_MUTE_NORMAL);
 	cq_writereg(&mn_bridge->cq, INFENA, 0x00);
+#endif
 	if (cq_exec(&mn_bridge->cq) < 0) {
 		DRM_ERROR("Failed to disable bridge\n");
 	}
