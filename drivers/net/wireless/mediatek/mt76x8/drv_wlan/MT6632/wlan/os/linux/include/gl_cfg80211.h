@@ -240,7 +240,8 @@ int mtk_cfg80211_set_rekey_data(struct wiphy *wiphy, struct net_device *dev, str
 
 int mtk_cfg80211_remain_on_channel(struct wiphy *wiphy,
 				   struct wireless_dev *wdev,
-				   struct ieee80211_channel *chan, unsigned int duration, u64 cookie);
+				   struct ieee80211_channel *chan, unsigned int duration, u64 cookie,
+				   const u8 *rx_addr);
 
 int mtk_cfg80211_cancel_remain_on_channel(struct wiphy *wiphy, struct wireless_dev *wdev, u64 cookie);
 #if KERNEL_VERSION(3, 14, 0) <= CFG80211_VERSION_CODE

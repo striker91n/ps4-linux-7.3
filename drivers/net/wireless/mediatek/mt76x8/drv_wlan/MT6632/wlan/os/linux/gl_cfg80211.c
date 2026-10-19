@@ -1891,7 +1891,8 @@ void mtk_cfg80211_mgmt_frame_register(IN struct wiphy *wiphy,
 /*----------------------------------------------------------------------------*/
 int mtk_cfg80211_remain_on_channel(struct wiphy *wiphy,
 				   struct wireless_dev *wdev,
-				   struct ieee80211_channel *chan, unsigned int duration, u64 cookie)
+				   struct ieee80211_channel *chan, unsigned int duration, u64 cookie,
+				   const u8 *rx_addr)
 {
 	P_GLUE_INFO_T prGlueInfo = NULL;
 	INT_32 i4Rslt = -EINVAL;
