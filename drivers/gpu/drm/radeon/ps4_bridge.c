@@ -749,7 +749,35 @@ static int radeon_ps4_bridge_attach(struct drm_bridge *bridge,
 	return 0;
 }
 
+/*
+ * Legacy (non-atomic) callbacks, as in 7.0.8.  The radeon DCE path also uses
+ * drm_crtc_helper_set_config(), which only drives the legacy bridge chain.
+ */
+static void radeon_ps4_bridge_legacy_pre_enable(struct drm_bridge *bridge)
+{
+	radeon_ps4_bridge_pre_enable(bridge, NULL);
+}
+
+static void radeon_ps4_bridge_legacy_enable(struct drm_bridge *bridge)
+{
+	radeon_ps4_bridge_enable(bridge, NULL);
+}
+
+static void radeon_ps4_bridge_legacy_disable(struct drm_bridge *bridge)
+{
+	radeon_ps4_bridge_disable(bridge, NULL);
+}
+
+static void radeon_ps4_bridge_legacy_post_disable(struct drm_bridge *bridge)
+{
+	radeon_ps4_bridge_post_disable(bridge, NULL);
+}
+
 static struct drm_bridge_funcs radeon_ps4_bridge_funcs = {
+	.pre_enable = radeon_ps4_bridge_legacy_pre_enable,
+	.enable = radeon_ps4_bridge_legacy_enable,
+	.disable = radeon_ps4_bridge_legacy_disable,
+	.post_disable = radeon_ps4_bridge_legacy_post_disable,
 	.atomic_pre_enable = radeon_ps4_bridge_pre_enable,
 	.atomic_enable = radeon_ps4_bridge_enable,
 	.atomic_disable = radeon_ps4_bridge_disable,

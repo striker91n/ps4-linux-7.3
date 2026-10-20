@@ -7,8 +7,8 @@
 #define ICC_MAX_READ_DATA 0xff
 #define ICC_MAX_WRITE_DATA 0xf8
 
-#define ICC_REPLY_HEADER_SIZE 0x14
-#define ICC_REPLY_ERROR_OFF 0x0c
+#define ICC_REPLY_HEADER_SIZE 8
+#define ICC_REPLY_ERROR_OFF 0
 
 u32 icc_i2c_functionality(struct i2c_adapter *adap);
 int icc_i2c_init(struct apcie_dev *sc);
@@ -98,7 +98,7 @@ static int icc_i2c_smbus_xfer(struct i2c_adapter *adapter, u16 addr,
 	msg.length = msg.cmd.length + 4;
 	ret = apcie_icc_cmd(0x10, 0x0, &msg, msg.length, resultbuf,
 		      sizeof(resultbuf));
-	if (ret < ICC_REPLY_HEADER_SIZE || ret > sizeof(resultbuf)) {
+	if (ret < 2 || ret > sizeof(resultbuf)) {
 		sc_err("icc-i2c: icc command failed: %d\n", ret);
 		return -EIO;
 	}

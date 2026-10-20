@@ -137,8 +137,8 @@
 #define PCI_DEVICE_ID_CUH_2XXX 0x9923
 #define PCI_DEVICE_ID_CUH_7XXX 0x9924
 
-#define PS4_BRIDGE_BELIZE_ENABLE_ATTEMPTS 5
-#define PS4_BRIDGE_BELIZE_RETRY_DELAY_MS 200
+#define PS4_BRIDGE_BELIZE_ENABLE_ATTEMPTS 3
+#define PS4_BRIDGE_BELIZE_RETRY_DELAY_MS 120
 #define PS4_BRIDGE_DPCD_READY_TIMEOUT_MS 3000
 
 struct edid *drm_get_edid(struct drm_connector *connector,
@@ -151,8 +151,6 @@ struct i2c_cmd_hdr {
 	u8 count;
 } __packed;
 
-#define ICC_REPLY_HEADER_SIZE 0x14
-
 struct i2c_cmdqueue {
 	struct {
 		u8 code;
@@ -161,10 +159,10 @@ struct i2c_cmdqueue {
 		u8 cmdbuf[0x7ec];
 	} __packed req;
 	struct {
-		u8 pad0[0xc];
 		u8 res1, res2;
-		u8 pad1[6];
-		u8 databuf[0x7f0 - ICC_REPLY_HEADER_SIZE];
+		u8 unk1, unk2;
+		u8 count;
+		u8 databuf[0x7eb];
 	} __packed reply;
 
 	u8 *p;
@@ -316,7 +314,7 @@ static int cq_exec(struct i2c_cmdqueue *q)
 	res = apcie_icc_cmd(0x10, 0, &q->req, q->req.length,
 		      &q->reply, sizeof(q->reply));
 
-	if (res < ICC_REPLY_HEADER_SIZE) {
+	if (res < 5) {
 		DRM_ERROR("icc i2c commandqueue failed: %d\n", res);
 		return -EIO;
 	}
@@ -450,13 +448,13 @@ static int ps4_bridge_read_edid_block_icc(void *data, u8 *buf,
 		cq_init(q, 4);
 		cq_read(q, addr, EDID_SEQ_READ_COUNT);
 		ret = cq_exec(q);
-		if (ret < 0) {
+		if (ret < 8 + EDID_SEQ_READ_COUNT) {
 			DRM_INFO("ps4_bridge: icc-edid: read iter=%u addr=0x%04x failed ret=%d res1=%u res2=%u\n",
 				 i, addr, ret, q->reply.res1, q->reply.res2);
 			mutex_unlock(&mn_bridge->mutex);
 			return -1;
 		}
-		memcpy(seqbuf + i * EDID_SEQ_READ_COUNT, q->reply.databuf,
+		memcpy(seqbuf + i * EDID_SEQ_READ_COUNT, &q->reply.databuf[3],
 		       EDID_SEQ_READ_COUNT);
 	}
 
@@ -627,52 +625,6 @@ static void ps4_bridge_pre_enable(struct drm_bridge *bridge, struct drm_atomic_c
 	mutex_unlock(&mn_bridge->mutex);
 }
 
-static int ps4_bridge_wait_dpcd_ready(struct ps4_bridge *mn_bridge,
-				      unsigned long timeout_ms)
-{
-	struct drm_connector *connector = mn_bridge->connector;
-	struct amdgpu_connector *amdgpu_connector;
-	struct amdgpu_connector_atom_dig *dig_connector;
-	unsigned long deadline;
-	int ret;
-
-	if (!connector)
-		return -ENODEV;
-
-	amdgpu_connector = to_amdgpu_connector(connector);
-	if (!amdgpu_connector->ddc_bus ||
-	    !amdgpu_connector->ddc_bus->has_aux)
-		return 0;
-
-	dig_connector = amdgpu_connector->con_priv;
-	if (dig_connector)
-		dig_connector->dp_sink_type = CONNECTOR_OBJECT_ID_DISPLAYPORT;
-
-	deadline = jiffies + msecs_to_jiffies(timeout_ms);
-	do {
-		ret = amdgpu_atombios_dp_get_dpcd(amdgpu_connector);
-		if (ret == 0)
-			return 0;
-		msleep(20);
-	} while (time_before(jiffies, deadline));
-
-	DRM_WARN("ps4_bridge: DPCD not ready after %lu ms\n", timeout_ms);
-	return -ETIMEDOUT;
-}
-
-static void ps4_bridge_reset_mn864729(struct ps4_bridge *mn_bridge)
-{
-	mutex_lock(&mn_bridge->mutex);
-	cq_init(&mn_bridge->cq, 4);
-	cq_writereg(&mn_bridge->cq, TSRST,
-		   TSRST_AVCSRST | TSRST_ENCSRST | TSRST_FIFOSRST |
-		   TSRST_CCSRST | TSRST_HDCPSRST | TSRST_AUDSRST |
-		   TSRST_VIFSRST);
-	if (cq_exec(&mn_bridge->cq) < 0)
-		DRM_ERROR("Failed to reset bridge between Belize attempts\n");
-	mutex_unlock(&mn_bridge->mutex);
-}
-
 static int ps4_bridge_enable_mn864729_video(struct ps4_bridge *mn_bridge,
 					    struct pci_dev *pdev)
 {
@@ -754,15 +706,6 @@ static int ps4_bridge_enable_mn864729_video(struct ps4_bridge *mn_bridge,
 	if (ret < 0)
 		DRM_ERROR("Failed to configure ps4-bridge (MN864729) mode\n");
 
-	cq_init(&mn_bridge->cq, 1);
-	cq_read(&mn_bridge->cq, 0x60f8, 2);
-	if (cq_exec(&mn_bridge->cq) >= ICC_REPLY_HEADER_SIZE + 2)
-		DRM_DEBUG_KMS("mn864729: 0x60f8=0x%02x 0x60f9=0x%02x\n",
-			      mn_bridge->cq.reply.databuf[0],
-			      mn_bridge->cq.reply.databuf[1]);
-	else
-		DRM_DEBUG_KMS("mn864729: 0x60f8/0x60f9 readback failed\n");
-
 	mutex_unlock(&mn_bridge->mutex);
 
 	return ret < 0 ? ret : 0;
@@ -840,6 +783,11 @@ static void ps4_bridge_enable(struct drm_bridge *bridge, struct drm_atomic_commi
 		goto out;
 	}
 
+	if (pdev->vendor != PCI_VENDOR_ID_ATI) {
+		DRM_ERROR("Invalid vendor: %04x", pdev->vendor);
+		goto out;
+	}
+
 	DRM_DEBUG_KMS("ps4_bridge_enable (mode: %d)\n", mn_bridge->mode);
 
 	/* Here come the dragons */
@@ -852,12 +800,12 @@ static void ps4_bridge_enable(struct drm_bridge *bridge, struct drm_atomic_commi
 
 		/* Read DisplayPort status (?) */
 		cq_read(&mn_bridge->cq, 0x76e1, 3);
-		if (cq_exec(&mn_bridge->cq) < ICC_REPLY_HEADER_SIZE + 3) {
+		if (cq_exec(&mn_bridge->cq) < 11) {
 			mutex_unlock(&mn_bridge->mutex);
 			DRM_ERROR("could not read DP status");
 			goto out;
 		}
-		memcpy(dp, &mn_bridge->cq.reply.databuf[0], 3);
+		memcpy(dp, &mn_bridge->cq.reply.databuf[3], 3);
 
 		cq_init(&mn_bridge->cq, 4);
 
@@ -967,9 +915,7 @@ static void ps4_bridge_enable(struct drm_bridge *bridge, struct drm_atomic_commi
 	}
 	else
 	{
-		ps4_bridge_wait_dpcd_ready(mn_bridge,
-					   PS4_BRIDGE_DPCD_READY_TIMEOUT_MS);
-
+		/* Panasonic MN864729 */
 		for (attempt = 1; attempt <= PS4_BRIDGE_BELIZE_ENABLE_ATTEMPTS;
 		     attempt++) {
 			DRM_DEBUG_KMS("ps4_bridge_enable: Belize attempt %u/%u\n",
@@ -983,10 +929,8 @@ static void ps4_bridge_enable(struct drm_bridge *bridge, struct drm_atomic_commi
 				break;
 			}
 
-			if (attempt < PS4_BRIDGE_BELIZE_ENABLE_ATTEMPTS) {
-				ps4_bridge_reset_mn864729(mn_bridge);
+			if (attempt < PS4_BRIDGE_BELIZE_ENABLE_ATTEMPTS)
 				msleep(PS4_BRIDGE_BELIZE_RETRY_DELAY_MS);
-			}
 		}
 
 		if (success)
@@ -1355,8 +1299,12 @@ enum drm_connector_status ps4_bridge_detect(struct drm_connector *connector,
 enum drm_mode_status ps4_bridge_mode_valid(struct drm_connector *connector,
 				  const struct drm_display_mode *mode)
 {
-	if (!drm_match_cea_mode(mode))
+	int vic = drm_match_cea_mode(mode);
+
+	/* Keep 60 Hz defaults conservative without forbidding valid 120 Hz VICs. */
+	if (!vic || (vic != 16 && vic != 4 && vic != 63)) {
 		return MODE_BAD;
+	}
 	return MODE_OK;
 }
 
@@ -1369,7 +1317,37 @@ static int ps4_bridge_attach(struct drm_bridge *bridge,
 	return 0;
 }
 
+/*
+ * Legacy (non-atomic) bridge callbacks, exactly as the proven 7.0.8 tree had
+ * them.  dce_v8_0 still exposes only drm_crtc_helper_funcs, and fbcon/KWin
+ * program modesets through drm_crtc_helper_set_config(), which drives the
+ * legacy bridge chain.  Without these the PS4 bridge is never enabled.
+ */
+static void ps4_bridge_legacy_pre_enable(struct drm_bridge *bridge)
+{
+	ps4_bridge_pre_enable(bridge, NULL);
+}
+
+static void ps4_bridge_legacy_enable(struct drm_bridge *bridge)
+{
+	ps4_bridge_enable(bridge, NULL);
+}
+
+static void ps4_bridge_legacy_disable(struct drm_bridge *bridge)
+{
+	ps4_bridge_disable(bridge, NULL);
+}
+
+static void ps4_bridge_legacy_post_disable(struct drm_bridge *bridge)
+{
+	ps4_bridge_post_disable(bridge, NULL);
+}
+
 static struct drm_bridge_funcs ps4_bridge_funcs = {
+	.pre_enable = ps4_bridge_legacy_pre_enable,
+	.enable = ps4_bridge_legacy_enable,
+	.disable = ps4_bridge_legacy_disable,
+	.post_disable = ps4_bridge_legacy_post_disable,
 	.atomic_pre_enable = ps4_bridge_pre_enable,
 	.atomic_enable = ps4_bridge_enable,
 	.atomic_disable = ps4_bridge_disable,
