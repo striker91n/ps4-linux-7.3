@@ -1376,6 +1376,16 @@ static struct drm_bridge_funcs ps4_bridge_funcs = {
 	.atomic_post_disable = ps4_bridge_post_disable,
 	.attach = ps4_bridge_attach,
 	.mode_set = ps4_bridge_mode_set,
+	/*
+	 * 7.3 unconditionally creates a private bridge state in
+	 * drm_bridge_attach() and calls these three callbacks.  The PS4 bridge
+	 * has no private state, so use the generic helpers.  Without them the
+	 * NULL atomic_create_state pointer is called and the kernel oopses at
+	 * RIP 0 during dce_v8_0_sw_init().
+	 */
+	.atomic_create_state = drm_atomic_helper_bridge_create_state,
+	.atomic_duplicate_state = drm_atomic_helper_bridge_duplicate_state,
+	.atomic_destroy_state = drm_atomic_helper_bridge_destroy_state,
 };
 
 int ps4_bridge_register(struct drm_connector *connector,

@@ -755,7 +755,10 @@ static struct drm_bridge_funcs radeon_ps4_bridge_funcs = {
 	.atomic_disable = radeon_ps4_bridge_disable,
 	.atomic_post_disable = radeon_ps4_bridge_post_disable,
 	.attach = radeon_ps4_bridge_attach,
-	.mode_set = radeon_ps4_bridge_mode_set
+	.mode_set = radeon_ps4_bridge_mode_set,
+	.atomic_create_state = drm_atomic_helper_bridge_create_state,
+	.atomic_duplicate_state = drm_atomic_helper_bridge_duplicate_state,
+	.atomic_destroy_state = drm_atomic_helper_bridge_destroy_state,
 };
 
 int radeon_ps4_bridge_register(struct drm_connector *connector,
