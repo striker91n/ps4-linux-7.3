@@ -72,6 +72,7 @@ void amdgpu_display_hotplug_work_func(struct work_struct *work)
 	struct drm_mode_config *mode_config = &dev->mode_config;
 	struct drm_connector *connector;
 	struct drm_connector_list_iter iter;
+	bool connected = false;
 
 	mutex_lock(&mode_config->mutex);
 	drm_connector_list_iter_begin(dev, &iter);
@@ -81,6 +82,48 @@ void amdgpu_display_hotplug_work_func(struct work_struct *work)
 	mutex_unlock(&mode_config->mutex);
 	/* Just fire off a uevent and let userspace tell us what to do */
 	drm_helper_hpd_irq_event(dev);
+
+	/*
+	 * PS4 "Liverpool"/"Gladius" display pipeline: the APU reaches the panel
+	 * through the MN864729 DP->HDMI bridge, and that bridge is programmed
+	 * only by the legacy KMS encoder/bridge enable chain.
+	 *
+	 * Unplugging HDMI makes the bridge lose its programmed state and the DP
+	 * link.  Replugging the same TV yields the same EDID and the same mode,
+	 * so drm_crtc_helper_set_config() classifies the userspace setcrtc that
+	 * follows the hotplug as a plain page flip and never runs the encoder
+	 * prepare / bridge mode_set / pre_enable / enable sequence again.  The
+	 * connector then reports connected and enabled, the CRTC keeps scanning
+	 * out, and the screen stays black until a reboot.  OrbisOS re-initialises
+	 * the display pipeline on every HPD.
+	 *
+	 * Do the same here: after a hotplug event, if a display is connected,
+	 * force a full modeset of the already-enabled CRTCs.  This is what
+	 * drm_helper_resume_force_mode() does on resume, and it tears the bridge
+	 * down (disable/post_disable) and programs it again
+	 * (mode_set/pre_enable/enable).
+	 *
+	 * Deliberately not gated on drm_helper_hpd_irq_event()'s return value:
+	 * a fast unplug/replug can leave the connector status at "connected"
+	 * (the probe only sees the final state) while the bridge still needs the
+	 * re-init.
+	 */
+	if (adev->asic_type != CHIP_LIVERPOOL && adev->asic_type != CHIP_GLADIUS)
+		return;
+
+	mutex_lock(&mode_config->mutex);
+	drm_connector_list_iter_begin(dev, &iter);
+	drm_for_each_connector_iter(connector, &iter) {
+		if (connector->status == connector_status_connected) {
+			connected = true;
+			break;
+		}
+	}
+	drm_connector_list_iter_end(&iter);
+	mutex_unlock(&mode_config->mutex);
+
+	if (connected)
+		drm_helper_resume_force_mode(dev);
 }
 
 static int amdgpu_display_framebuffer_init(struct drm_device *dev,
